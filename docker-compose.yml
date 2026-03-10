@@ -1,0 +1,26 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+    working_dir: /app
+    command: bash -lc "python scripts/generate_synthetic_data.py && python scripts/train_forecast_model.py && uvicorn backend.main:app --host 0.0.0.0 --port 8000"
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./:/app
+    working_dir: /app
+    environment:
+      API_BASE_URL: http://api:8000
+    depends_on:
+      - api
+    command: bash -lc "streamlit run dashboard/app.py --server.address 0.0.0.0 --server.port 8501"

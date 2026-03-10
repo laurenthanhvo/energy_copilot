@@ -1,0 +1,12 @@
+fastapi==0.115.8
+uvicorn[standard]==0.34.0
+pandas==2.2.3
+numpy==2.2.3
+scikit-learn==1.6.1
+duckdb==1.2.0
+joblib==1.4.2
+pyarrow==19.0.1
+streamlit==1.43.2
+plotly==6.0.1
+requests==2.32.3
+pydantic==2.10.6
