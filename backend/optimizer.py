@@ -11,6 +11,7 @@ def optimize_dispatch(
     soc0_mwh: float,
     emissions_weight: float = 0.02,
     peak_demand_weight: float = 15.0,
+    mode: str = "balanced",
 ):
     df = forecast_df.copy().reset_index(drop=True)
     if df.empty:
@@ -23,11 +24,43 @@ def optimize_dispatch(
     charge_eff = 0.95
     discharge_eff = 0.95
 
-    # Looser thresholds so the battery actually moves
-    low_price = float(price.quantile(0.45))
-    high_price = float(price.quantile(0.70))
-    low_carbon = float(carbon.quantile(0.45))
-    target_peak = float(demand.quantile(0.70))
+    if mode == "cost_saving":
+        low_price_q = 0.25
+        high_price_q = 0.75
+        low_carbon_q = 0.45
+        high_carbon_q = 0.90
+        peak_q = 0.97
+        reserve_frac = 0.05
+
+    elif mode == "carbon_aware":
+        low_price_q = 0.55
+        high_price_q = 0.90
+        low_carbon_q = 0.25
+        high_carbon_q = 0.75
+        peak_q = 0.97
+        reserve_frac = 0.05
+
+    elif mode == "peak_shaving":
+        low_price_q = 0.45
+        high_price_q = 0.70
+        low_carbon_q = 0.45
+        high_carbon_q = 0.70
+        peak_q = 0.65
+        reserve_frac = 0.40
+
+    else:  # balanced
+        low_price_q = 0.35
+        high_price_q = 0.80
+        low_carbon_q = 0.30
+        high_carbon_q = 0.80
+        peak_q = 0.82
+        reserve_frac = 0.15
+
+    low_price = float(price.quantile(low_price_q))
+    high_price = float(price.quantile(high_price_q))
+    low_carbon = float(carbon.quantile(low_carbon_q))
+    high_carbon = float(carbon.quantile(high_carbon_q))
+    target_peak = float(demand.quantile(peak_q))
 
     soc = min(max(soc0_mwh, 0.0), battery_mwh)
     schedule_rows = []
@@ -46,30 +79,47 @@ def optimize_dispatch(
 
         future_demand = demand.iloc[i + 1 :]
         future_price = price.iloc[i + 1 :]
+        future_carbon = carbon.iloc[i + 1 :]
 
         future_peak_exists = bool((future_demand > target_peak).any()) if len(future_demand) else False
         future_high_price_exists = bool((future_price >= high_price).any()) if len(future_price) else False
+        future_high_carbon_exists = bool((future_carbon >= high_carbon).any()) if len(future_carbon) else False
 
-        # Keep some energy reserved if higher future peaks still exist
-        reserve_soc_mwh = 0.30 * battery_mwh if future_peak_exists else 0.0
+        reserve_soc_mwh = reserve_frac * battery_mwh if future_peak_exists else 0.0
 
-        # 1) Peak shaving has top priority
-        if soc > 1e-9 and d > target_peak:
+        # Charging logic depends on mode
+        if mode == "cost_saving":
+            charge_signal = (p <= low_price) and future_high_price_exists
+            discharge_signal = p >= high_price
+
+        elif mode == "carbon_aware":
+            charge_signal = (c <= low_carbon) and future_high_carbon_exists
+            discharge_signal = c >= high_carbon
+
+        elif mode == "peak_shaving":
+            charge_signal = (p <= low_price or c <= low_carbon) and future_peak_exists
+            discharge_signal = (d > target_peak) or (p >= high_price)
+
+        else:  # balanced
+            charge_signal = (
+                (p <= low_price and future_high_price_exists)
+                or (c <= low_carbon and future_high_carbon_exists)
+            )
+            discharge_signal = (p >= high_price) or (c >= high_carbon)
+
+        # Peak shaving first for peak_shaving and balanced modes
+        if mode in {"peak_shaving", "balanced"} and soc > 1e-9 and d > target_peak:
             desired_discharge = d - target_peak
             max_deliverable = soc * discharge_eff
             discharge_mw = min(max_discharge_mw, d, max_deliverable, desired_discharge)
 
-        # 2) Charge during cheap OR clean hours if future valuable hours exist
-        elif (
-            soc < battery_mwh - 1e-9
-            and (p <= low_price or c <= low_carbon)
-            and (future_peak_exists or future_high_price_exists)
-        ):
+        # Charge when current hour is strategically good
+        elif soc < battery_mwh - 1e-9 and charge_signal:
             remaining_capacity = (battery_mwh - soc) / charge_eff
             charge_mw = min(max_charge_mw, remaining_capacity)
 
-        # 3) Discharge during expensive hours, but do not consume reserved energy
-        elif soc > reserve_soc_mwh and p >= high_price:
+        # Discharge for price/carbon only if reserve remains
+        elif soc > reserve_soc_mwh and discharge_signal:
             usable_soc = soc - reserve_soc_mwh
             max_deliverable = usable_soc * discharge_eff
             discharge_mw = min(max_discharge_mw, d, max_deliverable)
@@ -95,12 +145,8 @@ def optimize_dispatch(
 
     schedule = pd.DataFrame(schedule_rows)
 
-    optimized_cost = float(
-        (schedule["grid_mw"] * schedule["electricity_price_usd_mwh"]).sum()
-    )
-    optimized_emissions = float(
-        (schedule["grid_mw"] * schedule["carbon_intensity_kgco2_mwh"]).sum()
-    )
+    optimized_cost = float((schedule["grid_mw"] * schedule["electricity_price_usd_mwh"]).sum())
+    optimized_emissions = float((schedule["grid_mw"] * schedule["carbon_intensity_kgco2_mwh"]).sum())
     optimized_peak = float(schedule["grid_mw"].max())
 
     summary = {
@@ -115,6 +161,7 @@ def optimize_dispatch(
         "peak_reduction_mw": baseline_peak - optimized_peak,
         "hours_charged": int((schedule["charge_mw"] > 0).sum()),
         "hours_discharged": int((schedule["discharge_mw"] > 0).sum()),
+        "mode": mode,
     }
 
     return schedule, summary

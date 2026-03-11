@@ -1,4 +1,4 @@
-from __future__ import annotations
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -12,7 +12,12 @@ class RecommendationRequest(BaseModel):
     soc0_mwh: float = Field(10.0, ge=0)
     emissions_weight: float = Field(0.02, ge=0)
     peak_demand_weight: float = Field(15.0, ge=0)
+    mode: Literal["balanced", "cost_saving", "carbon_aware", "peak_shaving"] = "balanced"
 
 
 class AskRequest(BaseModel):
     question: str
+
+
+RecommendationRequest.model_rebuild()
+AskRequest.model_rebuild()

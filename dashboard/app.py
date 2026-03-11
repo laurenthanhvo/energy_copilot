@@ -13,6 +13,26 @@ st.set_page_config(page_title="Energy Copilot Dashboard", layout="wide")
 st.title("Energy Reliability & Dispatch Copilot")
 st.caption("Forecasting, anomaly detection, KPI analytics, and battery dispatch optimization")
 
+with st.expander("About this project"):
+    st.markdown("""
+    **Motivation**
+    - Industrial energy operators need fast ways to understand demand, cost, emissions, and storage decisions.
+
+    **What this demo includes**
+    - Synthetic site telemetry with missing data, duplicates, and outliers
+    - Forecasting, anomaly detection, KPI computation, and battery dispatch recommendation
+    - FastAPI backend + Streamlit dashboard + lightweight natural-language interface
+
+    **Current assumptions**
+    - Uses synthetic but realistic-looking data
+    - Battery dispatch is heuristic, not a full mathematical optimizer
+    - Results depend on the chosen dispatch mode and forecast horizon
+
+    **Next steps**
+    - Swap in real public energy/load/weather/carbon datasets
+    - Add baseline model comparisons
+    - Replace heuristic dispatch with formal constrained optimization
+    """)
 
 def api_get(path: str, params: dict | None = None) -> dict:
     response = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=60)
@@ -36,6 +56,12 @@ initial_soc_mwh = st.sidebar.slider(
     max_value=20.0,
     value=2.0,
     step=0.5,
+)
+
+dispatch_mode = st.sidebar.selectbox(
+    "Dispatch mode",
+    ["balanced", "cost_saving", "carbon_aware", "peak_shaving"],
+    index=0,
 )
 
 kpi_data = api_get("/kpis", {"site_id": site_id, "lookback_hours": lookback_hours})
@@ -171,6 +197,7 @@ rec = api_post(
         "soc0_mwh": initial_soc_mwh,
         "emissions_weight": 0.02,
         "peak_demand_weight": 15.0,
+        "mode": dispatch_mode,
     },
 )
 

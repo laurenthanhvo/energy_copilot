@@ -126,6 +126,7 @@ def recommendation(req: RecommendationRequest) -> Dict[str, Any]:
         soc0_mwh=req.soc0_mwh,
         emissions_weight=req.emissions_weight,
         peak_demand_weight=req.peak_demand_weight,
+        mode=req.mode,
     )
 
     return {
