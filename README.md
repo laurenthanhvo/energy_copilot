@@ -84,6 +84,7 @@ energy_copilot/
 ├── requirements.txt
 ├── docker-compose.yml
 └── README.md
+```
 
 ## How it works
 
@@ -283,3 +284,4 @@ Example request body:
 * Add automated tests and CI
 * Improve the natural-language analytics layer
 * Deploy the app publicly
+
